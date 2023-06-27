@@ -1,0 +1,10 @@
+node_modules
+.vscode/*
+dist/
+.DS_Store
+tests/
+docs/build
+docs/source/_build
+lib
+es 
+umd
