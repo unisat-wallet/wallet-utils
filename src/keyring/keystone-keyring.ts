@@ -50,7 +50,7 @@ export class KeystoneKeyring extends EventEmitter {
     }
   }
 
-  async initFromUR(type: string, cbor: string, connectionType?:'USB' | 'QR') {
+  async initFromUR(type: string, cbor: string, connectionType?: 'USB' | 'QR') {
     const keystoneSDK = new KeystoneSDK({
       origin: this.origin
     });
@@ -392,6 +392,50 @@ export class KeystoneKeyring extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async signMessage(publicKey: string, text: string) {
     return 'Signing Message with Keystone should use genSignMsgUr and parseSignMsgUr';
+  }
+
+  async genSignCosmosUr(cosmosSignRequest: {
+    requestId?: string;
+    signData: string;
+    dataType: any;
+    path: string;
+    chainId?: string;
+    accountNumber?: string;
+    address?: string;
+  }) {
+    const keystoneSDK = new KeystoneSDK({
+      origin: this.origin
+    });
+
+    const requestId = cosmosSignRequest.requestId || uuid.v4();
+
+    const ur = keystoneSDK.cosmos.generateSignRequest({
+      requestId,
+      signData: cosmosSignRequest.signData,
+      dataType: cosmosSignRequest.dataType as any,
+      accounts: [
+        {
+          path: cosmosSignRequest.path,
+          xfp: this.mfp,
+          address: cosmosSignRequest.address || ''
+        }
+      ],
+      origin: this.origin
+    });
+
+    return {
+      requestId,
+      type: ur.type,
+      cbor: ur.cbor.toString('hex')
+    };
+  }
+
+  async parseSignCosmosUr(type: string, cbor: string) {
+    const keystoneSDK = new KeystoneSDK({
+      origin: this.origin
+    });
+
+    return keystoneSDK.cosmos.parseSignature(new UR(Buffer.from(cbor, 'hex'), type));
   }
 
   async verifyMessage(publicKey: string, text: string, sig: string) {
