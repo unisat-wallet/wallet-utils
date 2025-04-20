@@ -70,6 +70,18 @@ export class SimpleKeyring extends EventEmitter {
         if (tweak) {
           signer = tweakSigner(keyPair, opts);
         }
+
+        // if the input has a tapMerkleRoot then the user is trying to key-path spend
+        // we need to tweak the signer by the tapMerkleRoot (if the signer is already tweaked, we need to tweak it again)
+        // this will sign the input with the private key corresponding to the address as opposed to the script 
+        let tweakHash = psbt.data.inputs[input.index].tapMerkleRoot;
+        if (tweakHash) {
+          const _opts = opts || {
+            tweakHash
+          };
+          signer = tweakSigner(signer, _opts);
+        }
+
         psbt.signTaprootInput(input.index, signer, input.tapLeafHashToSign, input.sighashTypes);
       } else {
         let signer: bitcoin.Signer = keyPair;
