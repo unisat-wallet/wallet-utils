@@ -382,4 +382,169 @@ describe('sign transaction', function () {
     // const tx = psbt.extractTransaction(true);
     // console.log(tx.toHex());
   });
+
+  it('sign P2TR script by internal key tweaked with the merkle root (key-path spend)', async function () {
+    const network = bitcoin.networks.bitcoin;
+
+    const userWallet = new LocalWallet(dummyWallets.walletB.wif, AddressType.P2TR, NetworkType.MAINNET);
+    
+    // create an irredeemable script, then script-path spend is impossible
+    // only way to spend is via the key-path using the user's private key tweaked by the merkle root of the script
+    const redeemScript = bitcoin.script.compile([
+      bitcoin.opcodes.OP_FALSE
+    ]);
+
+    const tapLeaf: Tapleaf = {
+      output: redeemScript,
+      version: 192
+    };
+    const tapTree: Taptree = tapLeaf;
+
+    const scriptPayment = bitcoin.payments.p2tr({
+      internalPubkey: toXOnly(Buffer.from(userWallet.pubkey, 'hex')),
+      scriptTree: tapTree,
+      redeem: { output: redeemScript },
+      network
+    });
+
+    const dummyValue = 10000;
+    const prevoutHash = Buffer.from('0000000000000000000000000000000000000000000000000000000000000000', 'hex');
+    const prevoutIndex = 0xffffffff;
+    const sequence = 0;
+    const txToSpend = new bitcoin.Transaction();
+    txToSpend.version = 0;
+    txToSpend.addInput(prevoutHash, prevoutIndex, sequence);
+    txToSpend.addOutput(scriptPayment.output, dummyValue);
+    const txHex = txToSpend.toHex();
+    let dummyUtxo = {
+      txid: txToSpend.getId(),
+      vout: 0,
+      value: dummyValue,
+      txHex
+    };
+
+    const psbt: bitcoin.Psbt = new bitcoin.Psbt({
+      network
+    });
+
+    psbt.addInput({
+      hash: dummyUtxo.txid,
+      index: dummyUtxo.vout,
+      witnessUtxo: {
+        value: dummyUtxo.value,
+        script: scriptPayment.output
+      },
+      tapInternalKey: toXOnly(Buffer.from(userWallet.pubkey, 'hex')),
+      tapMerkleRoot: scriptPayment.hash,
+      sighashType: 1
+    });
+    psbt.addOutput({
+      script: scriptPayment.output,
+      value: dummyUtxo.value - 500
+    });
+
+    // // use wallet to sign
+
+    await userWallet.signPsbt(psbt, {
+      toSignInputs: [{ index: 0, publicKey: userWallet.pubkey, disableTweakSigner: true, sighashTypes: [1] }]
+    });
+
+    // validate the signature using the internal key, tweaked by the merkle root
+    let merkleRoot = scriptPayment.hash;
+    let merkleRootTweakedSigner = tweakSigner(ECPair.fromWIF(dummyWallets.walletB.wif, network), {
+      tweakHash: merkleRoot
+    });
+
+    const validated = psbt.validateSignaturesOfAllInputs((pubkey, msghash, signature) => {
+      return ECPair.fromPublicKey(merkleRootTweakedSigner.publicKey, {}).verifySchnorr(msghash, signature);
+    });
+    expect(validated).to.be.true;
+
+    psbt.finalizeAllInputs();
+    // const tx = psbt.extractTransaction(true);
+    // console.log(tx.toHex());
+  });
+
+  it('sign P2TR script by tweaked key tweaked again with the merkle root (key-path spend)', async function () {
+    const network = bitcoin.networks.bitcoin;
+
+    const userWallet = new LocalWallet(dummyWallets.walletB.wif, AddressType.P2TR, NetworkType.MAINNET);
+    const userTweakedSigner = tweakSigner(ECPair.fromWIF(dummyWallets.walletB.wif, network));
+    const tweakedPubkey = userTweakedSigner.publicKey;
+
+    // create an irredeemable script, then script-path spend is impossible
+    // only way to spend is via the key-path using the user's tweaked private key, tweaked (again) by the merkle root of the script
+    const redeemScript = bitcoin.script.compile([
+      bitcoin.opcodes.OP_FALSE
+    ]);
+
+    const tapLeaf: Tapleaf = {
+      output: redeemScript,
+      version: 192
+    };
+    const tapTree: Taptree = tapLeaf;
+
+    const scriptPayment = bitcoin.payments.p2tr({
+      internalPubkey: toXOnly(tweakedPubkey),
+      scriptTree: tapTree,
+      redeem: { output: redeemScript },
+      network
+    });
+
+    const dummyValue = 10000;
+    const prevoutHash = Buffer.from('0000000000000000000000000000000000000000000000000000000000000000', 'hex');
+    const prevoutIndex = 0xffffffff;
+    const sequence = 0;
+    const txToSpend = new bitcoin.Transaction();
+    txToSpend.version = 0;
+    txToSpend.addInput(prevoutHash, prevoutIndex, sequence);
+    txToSpend.addOutput(scriptPayment.output, dummyValue);
+    const txHex = txToSpend.toHex();
+    let dummyUtxo = {
+      txid: txToSpend.getId(),
+      vout: 0,
+      value: dummyValue,
+      txHex
+    };
+
+    const psbt: bitcoin.Psbt = new bitcoin.Psbt({
+      network
+    });
+
+    psbt.addInput({
+      hash: dummyUtxo.txid,
+      index: dummyUtxo.vout,
+      witnessUtxo: {
+        value: dummyUtxo.value,
+        script: scriptPayment.output
+      },
+      tapInternalKey: toXOnly(userTweakedSigner.publicKey),
+      tapMerkleRoot: scriptPayment.hash,
+      sighashType: 1
+    });
+    psbt.addOutput({
+      script: scriptPayment.output,
+      value: dummyUtxo.value - 500
+    });
+
+    await userWallet.signPsbt(psbt, {
+      toSignInputs: [{ index: 0, publicKey: userWallet.pubkey, disableTweakSigner: false, sighashTypes: [1] }]
+    });
+
+
+    // validate the signature using the tweaked key, tweaked again by the merkle root
+    let merkleRoot = scriptPayment.hash;
+    let merkleRootTweakedSigner = tweakSigner(userTweakedSigner, {
+      tweakHash: merkleRoot
+    });
+
+    const validated = psbt.validateSignaturesOfAllInputs((pubkey, msghash, signature) => {
+      return ECPair.fromPublicKey(merkleRootTweakedSigner.publicKey, {}).verifySchnorr(msghash, signature);
+    });
+    expect(validated).to.be.true;
+
+    psbt.finalizeAllInputs();
+    // const tx = psbt.extractTransaction(true);
+    // console.log(tx.toHex());
+  });
 });
