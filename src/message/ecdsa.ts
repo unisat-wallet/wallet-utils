@@ -14,15 +14,11 @@ export function verifyMessageOfECDSA(publicKey: string, text: string, sig: strin
   const hash = message.magicHash();
 
   // recover the public key
-  const ecdsa = new bitcore.crypto.ECDSA();
-  ecdsa.hashbuf = hash;
-  ecdsa.sig = signature;
+  const recoveredPubKey = bitcore.crypto.ECDSA.recoverPublicKey(hash, signature);
 
-  const pubkeyInSig = ecdsa.toPublicKey();
+  const pubkeyInSig = new bitcore.PublicKey(recoveredPubKey.point, { compressed: true });
 
-  const pubkeyInSigString = new bitcore.PublicKey(
-    Object.assign({}, pubkeyInSig.toObject(), { compressed: true })
-  ).toString();
+  const pubkeyInSigString = pubkeyInSig.toString();
   if (pubkeyInSigString != publicKey) {
     return false;
   }
